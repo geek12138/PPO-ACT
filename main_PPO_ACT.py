@@ -10,6 +10,25 @@ import argparse
 import os
 import shutil
 import re
+from scipy import stats  # 用于计算置信区间
+
+def calculate_statistics(data):
+    """计算均值、标准差和95%置信区间"""
+    mean = np.mean(data)
+    std = np.std(data, ddof=1)  # 样本标准差
+    n = len(data)
+    if n > 1:
+        ci = stats.t.interval(0.95, n-1, loc=mean, scale=std/np.sqrt(n))
+    else:
+        ci = (mean, mean)
+    return {
+        'mean': mean,
+        'std': std,
+        'ci_lower': ci[0],
+        'ci_upper': ci[1],
+        'min': np.min(data),
+        'max': np.max(data)
+    }
 
 def save_params_to_json(params, filename_prefix="params",output_path='data'):
     # 创建参数保存目录
@@ -47,10 +66,10 @@ async def main(args):
     formatted_time = current_time.strftime("%Y_%m_%d_%H%M%S")
     # 实验参数设置
     fontsize=16
-    # r_values = [4.9,5.0,5.1]#[4.5,4.6,4.7,4.8,4.9,5.0,5.1]#[3.6, 3.8, 4.7, 5.0, 5.5, 6.0] #[3.0, 5.0, 7.0, 9.0]  # 公共物品乘数
+    r_values = [4.9]#[4.5,4.6,4.7,4.8,4.9,5.0,5.1]#[3.6, 3.8, 4.7, 5.0, 5.5, 6.0] #[3.0, 5.0, 7.0, 9.0]  # 公共物品乘数
     # 使用 arange 生成从 1 到 6 的列表，间隔为 0.1
     # r_values = [round(i * 0.1, 1) for i in range(45, 56)]
-    r_values = [round(i * 0.1, 1) for i in range(30, 61)]
+    # r_values = [round(i * 0.1, 1) for i in range(30, 61)]
     # print(result_list)
 
     if args.device=='cuda':
@@ -58,17 +77,13 @@ async def main(args):
     elif args.device=='cpu':
         device = torch.device("cpu")
     if args.epochs==1000:
-        xticks=[0, 10, 100, 1000, 10000, 100000]
+        xticks=[0, 1, 10, 100, 1000]
     elif args.epochs==10000:
-        xticks=[0, 10, 100, 1000, 10000]
+        xticks=[0, 1, 10, 100, 1000, 10000]
     elif args.epochs==100000:
-        xticks=[0, 10, 100, 1000]
-    fra_yticks=[0.00, 0.20, 0.40, 0.60, 0.80, 1.00]
+        xticks=[0, 1, 10, 100, 1000, 10000, 100000]
+    fra_yticks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
     profite_yticks=[0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-
-    if not args.is_PPO:
-        args.ppo_epochs=1
-        args.batch_size=1
 
     # 实验参数设置
     experiment_params = {
@@ -83,8 +98,6 @@ async def main(args):
         "ppo_epochs": args.ppo_epochs,
         "batch_size": args.batch_size,
         "gae_lambda": args.gae_lambda,
-        "is_PPO": args.is_PPO,
-        "is_fermi": args.is_fermi,
         "device": device,  # 自动转换为字符串
         "xticks": xticks,
         "fra_yticks": fra_yticks,
@@ -96,15 +109,23 @@ async def main(args):
         "pretrained_path": args.pretrained_path
     }
 
-    if args.is_PPO and (not args.is_fermi):
-        output_path=f'data/PPO_ACT_pre_{formatted_time}_q{str(args.question)}_e_{args.epochs}_L_{args.L_num}_a_{args.alpha}_g_{args.gamma}_ce_{args.clip_epsilon}_gl_{args.gae_lambda}_delta_{args.delta}_rho_{args.rho}_seed_{args.seed}'
+    if args.pretrained_path:
+        output_path=f'data/PPO_ACT_{formatted_time}_q{str(args.question)}_e_{args.epochs}_L_{args.L_num}_a_{args.alpha}_g_{args.gamma}_ce_{args.clip_epsilon}_gl_{args.gae_lambda}_delta_{args.delta}_rho_{args.rho}_seed_{args.seed}'
     else:
-        output_path=f'data/PPO_Fermi_ACT_pre_{formatted_time}_q{str(args.question)}_e_{args.epochs}_L_{args.L_num}_a_{args.alpha}_g_{args.gamma}_ce_{args.clip_epsilon}_gl_{args.gae_lambda}_delta_{args.delta}_rho_{args.rho}_seed_{args.seed}'
+        output_path=f'data/PPO_{formatted_time}_q{str(args.question)}_e_{args.epochs}_L_{args.L_num}_a_{args.alpha}_g_{args.gamma}_ce_{args.clip_epsilon}_gl_{args.gae_lambda}_delta_{args.delta}_rho_{args.rho}_seed_{args.seed}'
     save_params_to_json(experiment_params, filename_prefix="params",output_path=output_path)
+
+    # 初始化结果存储结构
+    results = {
+        'strategy_evolution': {},
+        'final_cooperation': {}
+    }
 
     # 实验循环
     for r in r_values:
         print(f"\nRunning experiment with r={r}")
+        results['strategy_evolution'][r] = {'C': [], 'D': []}
+        results['final_cooperation'][r] = {'C': [], 'D': []}
         # 多次独立运行
         for num in range(args.runs):
             # 初始化模型
@@ -121,8 +142,6 @@ async def main(args):
                 ppo_epochs=args.ppo_epochs,
                 batch_size=args.batch_size,
                 gae_lambda=args.gae_lambda,
-                is_PPO=args.is_PPO,
-                is_fermi=args.is_fermi,
                 output_path=output_path,
                 delta=args.delta,
                 rho=args.rho
@@ -141,11 +160,9 @@ async def main(args):
                 start_epoch = checkpoint['epoch']
                 pre_r=checkpoint['r']
                 pretrained_path_root=args.pretrained_path.split('/checkpoint')[0]
-                # os.makedirs(f'{output_path}/Density_C', exist_ok=True)
-                # os.makedirs(f'{output_path}/Density_D', exist_ok=True)
                 os.makedirs(f'{output_path}/shot_pic', exist_ok=True)
-                os.makedirs(f'{output_path}/shot_pic/r={pre_r}/two_type_0/profit_matrix', exist_ok=True)
-                os.makedirs(f'{output_path}/shot_pic/r={pre_r}/two_type_0/type_t_matrix', exist_ok=True)
+                os.makedirs(f'{output_path}/shot_pic/r={pre_r}/two_type/profit_matrix', exist_ok=True)
+                os.makedirs(f'{output_path}/shot_pic/r={pre_r}/two_type/type_t_matrix', exist_ok=True)
                 # 提取Density_C中对应txt文件的前start_epoch-1行
                 Density_C_txt = f'{pretrained_path_root}/Density_C/r{pre_r}.txt'
                 Density_D_txt = f'{pretrained_path_root}/Density_D/r{pre_r}.txt'
@@ -160,9 +177,9 @@ async def main(args):
                     t_list=[0, 10]
 
                 for copy_t in t_list:
-                    shutil.copy2(f'{pretrained_path_root}/shot_pic/r={pre_r}/two_type_0/t={copy_t}.pdf', f'{output_path}/shot_pic/t={copy_t}.pdf')
-                    shutil.copy2(f'{pretrained_path_root}/shot_pic/r={pre_r}/two_type_0/profit_matrix/T{copy_t}.txt', f'{output_path}/shot_pic/r={pre_r}/two_type_0/profit_matrix/T{copy_t}.txt')
-                    shutil.copy2(f'{pretrained_path_root}/shot_pic/r={pre_r}/two_type_0/type_t_matrix/T{copy_t}.txt', f'{output_path}/shot_pic/r={pre_r}/two_type_0/type_t_matrix/T{copy_t}.txt')
+                    shutil.copy2(f'{pretrained_path_root}/shot_pic/r={pre_r}/two_type/t={copy_t}.pdf', f'{output_path}/shot_pic/t={copy_t}.pdf')
+                    shutil.copy2(f'{pretrained_path_root}/shot_pic/r={pre_r}/two_type/profit_matrix/T{copy_t}.txt', f'{output_path}/shot_pic/r={pre_r}/two_type/profit_matrix/T{copy_t}.txt')
+                    shutil.copy2(f'{pretrained_path_root}/shot_pic/r={pre_r}/two_type/type_t_matrix/T{copy_t}.txt', f'{output_path}/shot_pic/r={pre_r}/two_type/type_t_matrix/T{copy_t}.txt')
             else:
                 print("No pretrained weights provided.")
 
@@ -172,9 +189,16 @@ async def main(args):
             # 执行模拟
             D_Y, C_Y, D_Value, C_Value, all_value = model.run(num=num,start_epoch=start_epoch)
             
+            # 存储结果
+            results['strategy_evolution'][r]['C'].append(C_Y)
+            results['strategy_evolution'][r]['D'].append(D_Y)
+            results['final_cooperation'][r]['C'].append(C_Y[-1])  # 最终合作率
+            results['final_cooperation'][r]['D'].append(D_Y[-1])
             # 保存实验结果
             D_Y = D_Y_pre+D_Y
             C_Y = C_Y_pre+C_Y
+            del D_Y[-start_epoch:]
+            del C_Y[-start_epoch:]
             model.save_data('Density_D', f'r{r}', r, D_Y) # Density_D（背叛者密度），保存每个时间步中选择背叛策略的个体比例
             model.save_data('Density_C', f'r{r}', r, C_Y) # Density_C（合作者密度），保存每个时间步中选择合作策略的个体比例
             model.save_data('Value_D', f'r{r}', r, D_Value) # Value_D（背叛者收益），保存每个时间步中背叛者的平均收益
@@ -183,7 +207,7 @@ async def main(args):
             
             plt.clf()
             plt.close("all")
-            plt.xticks(xticks, [str(x) for x in xticks], fontsize=fontsize)  # 强制显示预设刻度
+            # plt.xticks(xticks, [str(x) for x in xticks], fontsize=fontsize)  # 强制显示预设刻度
             plt.yscale('linear')  # 保持y轴线性尺度（更直观观察比例变化）
             plt.grid(True, which='both', axis='y', linestyle='--', linewidth=0.5)  # 仅显示y轴网格
             plt.axhline(y=0.5, color='gray', linestyle=':', linewidth=1)  # 添加50%参考线
@@ -195,8 +219,14 @@ async def main(args):
             plt.plot(D_Y, 'r-', linewidth=2, alpha=0.7, label='D')
 
             # 设置对数坐标轴
-            plt.xscale('log')
-            # plt.xticks(xticks, [str(x) for x in xticks], fontsize=12)
+            # plt.xscale('log')
+            plt.xlim(0, None)
+            plt.xscale('symlog', 
+                linthresh=1,      # 线性/对数分界
+                linscale=0.5,     # 线性区域压缩程度
+                subs=np.arange(1,10))      # 对数区间的次要刻度
+
+            plt.xticks(xticks, [str(x) for x in xticks], fontsize=fontsize)
             plt.yticks(fra_yticks, fontsize=fontsize)
 
             # 增强可视化效果
@@ -236,7 +266,8 @@ async def main(args):
             with open(file_path, "r") as file:
                 lines = file.readlines()
                 if lines:  # 确保文件不为空
-                    last_line = lines[-1].strip()  # 提取最后一行并去掉换行符
+                    # last_line = lines[-1].strip()  # 提取最后一行并去掉换行符
+                    last_line = lines[-start_epoch].strip()
                     try:
                         y_value = float(last_line)  # 将最后一行转换为浮点数
                         y_values.append(y_value)
@@ -274,6 +305,97 @@ async def main(args):
         plt.close()
     else:
         print("没有找到有效的数据。")
+
+    # 计算统计量
+    stats_results = {}
+    for r in r_values:
+        stats_results[r] = {
+            'C': calculate_statistics(results['final_cooperation'][r]['C']),
+            'D': calculate_statistics(results['final_cooperation'][r]['D'])
+        }
+    
+    # 保存统计结果
+    with open(f'{output_path}/statistics_results.json', 'w') as f:
+        json.dump(stats_results, f, indent=4)
+    
+    # 绘制带统计信息的策略演化图
+    for r in r_values:
+        plt.figure(figsize=(10, 6))
+        
+        # 计算所有运行的均值和标准差
+        C_data = np.array(results['strategy_evolution'][r]['C'])
+        D_data = np.array(results['strategy_evolution'][r]['D'])
+        
+        C_mean = np.mean(C_data, axis=0)
+        C_std = np.std(C_data, axis=0)
+        D_mean = np.mean(D_data, axis=0)
+        D_std = np.std(D_data, axis=0)
+        
+        # 绘制均值曲线
+        plt.plot(C_mean, 'b-', label='Cooperation (mean)')
+        plt.plot(D_mean, 'r-', label='Defection (mean)')
+        
+        # 绘制标准差区域
+        plt.fill_between(range(len(C_mean)), 
+                        C_mean - C_std, 
+                        C_mean + C_std, 
+                        color='blue', alpha=0.2)
+        plt.fill_between(range(len(D_mean)), 
+                        D_mean - D_std, 
+                        D_mean + D_std, 
+                        color='red', alpha=0.2)
+        
+        # 设置图形属性
+        plt.xscale('log')
+        plt.xticks(xticks, [str(x) for x in xticks], fontsize=fontsize)
+        plt.yticks(fra_yticks, fontsize=fontsize)
+        plt.grid(True, which='both', linestyle='--', alpha=0.5)
+        plt.xlabel('t', fontsize=fontsize, labelpad=10)
+        plt.ylabel('Fractions', fontsize=fontsize, labelpad=10)
+        plt.legend(loc='best', fontsize=fontsize)
+        plt.ylim(0, 1)
+        
+        # 保存图片
+        plt.savefig(f'{output_path}/strategy_evolution_r{r}_with_stats.pdf', 
+                   format='pdf', dpi=300, bbox_inches='tight')
+        plt.close()
+    
+    # 绘制最终合作率的统计图
+    r_list = sorted(stats_results.keys())
+    C_means = [stats_results[r]['C']['mean'] for r in r_list]
+    C_stds = [stats_results[r]['C']['std'] for r in r_list]
+    D_means = [stats_results[r]['D']['mean'] for r in r_list]
+    D_stds = [stats_results[r]['D']['std'] for r in r_list]
+    
+    plt.figure(figsize=(10, 6))
+    plt.errorbar(r_list, C_means, yerr=C_stds, fmt='bo-', 
+                capsize=5, label='Cooperation')
+    plt.errorbar(r_list, D_means, yerr=D_stds, fmt='rd-', 
+                capsize=5, label='Defection')
+    
+    plt.xlabel('r', fontsize=fontsize)
+    plt.ylabel('Final Fraction', fontsize=fontsize)
+    plt.xticks(fontsize=fontsize)
+    plt.yticks(fontsize=fontsize)
+    plt.legend(fontsize=fontsize)
+    plt.grid(True)
+    plt.ylim(0, 1)
+    
+    plt.savefig(f'{output_path}/final_fractions_with_error_bars.pdf',
+               format='pdf', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # 打印统计摘要
+    print("\n=== Statistical Summary ===")
+    for r in r_list:
+        print(f"\nFor r = {r}:")
+        print(f"Cooperation - Mean: {stats_results[r]['C']['mean']:.4f} ± {stats_results[r]['C']['std']:.4f}")
+        print(f"            95% CI: [{stats_results[r]['C']['ci_lower']:.4f}, {stats_results[r]['C']['ci_upper']:.4f}]")
+        print(f"Defection   - Mean: {stats_results[r]['D']['mean']:.4f} ± {stats_results[r]['D']['std']:.4f}")
+        print(f"            95% CI: [{stats_results[r]['D']['ci_lower']:.4f}, {stats_results[r]['D']['ci_upper']:.4f}]")
+
+    print("\nAll experiments completed with statistical analysis!")
+
 
 def load_first_n_lines(file_path, n=1000):
     """
@@ -316,10 +438,6 @@ if __name__ == "__main__":
     parser.add_argument('-batch_size', type=int, default=1, help='Batch size')
     parser.add_argument('-gae_lambda', type=float, default=0.95, help='GAE lambda')
     parser.add_argument('-device', type=str, default='cuda', help='Device')
-    parser.add_argument('-is_PPO', action='store_true', default=True, help='is PPO')
-    parser.add_argument('-is_not_PPO', action='store_false', dest='is_PPO', help='is not PPO')
-    parser.add_argument('-is_fermi', action='store_true', default=True, help='is fermi')
-    parser.add_argument('-is_not_fermi', action='store_false', dest='is_fermi', help='is not fermi')
     parser.add_argument('-seed', type=int, default=1, help='random seed')
     parser.add_argument('-output_path', type=str, default='data', help='output path')
     parser.add_argument('-delta', type=float, default=0.5, help='delta')

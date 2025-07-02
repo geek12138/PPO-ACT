@@ -46,10 +46,10 @@ async def main(args):
     formatted_time = current_time.strftime("%Y_%m_%d_%H%M%S")
     # 实验参数设置
     fontsize=16
-    # r_values = [3.3]#[4.5,4.6,4.7,4.8,4.9,5.0,5.1]#[3.6, 3.8, 4.7, 5.0, 5.5, 6.0] #[3.0, 5.0, 7.0, 9.0]  # 公共物品乘数
+    r_values = [4.9]#[4.5,4.6,4.7,4.8,4.9,5.0,5.1]#[3.6, 3.8, 4.7, 5.0, 5.5, 6.0] #[3.0, 5.0, 7.0, 9.0]  # 公共物品乘数
     # 使用 arange 生成从 1 到 6 的列表，间隔为 0.1
     # r_values = [round(i * 0.1, 1) for i in range(45, 56)]
-    r_values = [round(i * 0.1, 1) for i in range(10, 51)]
+    # r_values = [round(i * 0.1, 1) for i in range(10, 51)]
     # print(result_list)
 
     if args.device=='cuda':
@@ -57,11 +57,11 @@ async def main(args):
     elif args.device=='cpu':
         device = torch.device("cpu")
     if args.epochs==1000:
-        xticks=[0, 1, 10, 100, 1000, 10000, 100000]
+        xticks=[0, 1, 10, 100, 1000]
     elif args.epochs==10000:
         xticks=[0, 1, 10, 100, 1000, 10000]
     elif args.epochs==100000:
-        xticks=[0, 1, 10, 100, 1000]
+        xticks=[0, 1, 10, 100, 1000, 10000, 100000]
     fra_yticks=[0.00, 0.20, 0.40, 0.60, 0.80, 1.00]
     profite_yticks=[0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 

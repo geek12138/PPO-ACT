@@ -47,9 +47,9 @@ async def main(args):
     formatted_time = current_time.strftime("%Y_%m_%d_%H%M%S")
     # 实验参数设置
     fontsize=16
-    # r_values = [4.5,4.6,4.7,4.8,4.9,5.0,5.1,5.2,5]#[4.5,4.6,4.7,4.8,4.9,5.0,5.1]#[3.6, 3.8, 4.7, 5.0, 5.5, 6.0] #[3.0, 5.0, 7.0, 9.0]  # 公共物品乘数
+    r_values = [5.0]#[4.5,4.6,4.7,4.8,4.9,5.0,5.1]#[3.6, 3.8, 4.7, 5.0, 5.5, 6.0] #[3.0, 5.0, 7.0, 9.0]  # 公共物品乘数
     # 使用 arange 生成从 1 到 6 的列表，间隔为 0.1
-    r_values = [round(i * 0.1, 1) for i in range(10, 51)]
+    # r_values = [round(i * 0.1, 1) for i in range(10, 51)]
     # print(result_list)
 
     if args.device=='cuda':
@@ -65,10 +65,6 @@ async def main(args):
     fra_yticks=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
     profite_yticks=[0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 
-    if not args.is_PPO:
-        args.ppo_epochs=1
-        args.batch_size=1
-
     # 实验参数设置
     experiment_params = {
         "r": r_values,
@@ -82,8 +78,6 @@ async def main(args):
         "ppo_epochs": args.ppo_epochs,
         "batch_size": args.batch_size,
         "gae_lambda": args.gae_lambda,
-        "is_PPO": args.is_PPO,
-        "is_fermi": args.is_fermi,
         "device": device,  # 自动转换为字符串
         "xticks": xticks,
         "fra_yticks": fra_yticks,
@@ -94,7 +88,7 @@ async def main(args):
         "rho": args.rho
     }
 
-    output_path=f'data/PPO_{formatted_time}_q{str(args.question)}_e_{args.epochs}_L_{args.L_num}_a_{args.alpha}_g_{args.gamma}_ce_{args.clip_epsilon}_gl_{args.gae_lambda}_d_{args.gae_lambda}_p_{args.ppo_epochs}_b_{args.batch_size}_delta_{args.delta}_rho_{args.rho}_seed_{args.seed}'
+    output_path=f'data/PPO_{formatted_time}_q{str(args.question)}_e_{args.epochs}_L_{args.L_num}_a_{args.alpha}_g_{args.gamma}_ce_{args.clip_epsilon}_gl_{args.gae_lambda}_p_{args.ppo_epochs}_b_{args.batch_size}_delta_{args.delta}_rho_{args.rho}_seed_{args.seed}'
 
     save_params_to_json(experiment_params, filename_prefix="params",output_path=output_path)
 
@@ -117,8 +111,6 @@ async def main(args):
                 ppo_epochs=args.ppo_epochs,
                 batch_size=args.batch_size,
                 gae_lambda=args.gae_lambda,
-                is_PPO=args.is_PPO,
-                is_fermi=args.is_fermi,
                 output_path=output_path,
                 delta=args.delta,
                 rho=args.rho
@@ -130,11 +122,11 @@ async def main(args):
             D_Y, C_Y, D_Value, C_Value, all_value = model.run()
             
             # 保存实验结果
-            model.save_data('Density_D', f'Density_D_r{r}', r, D_Y) # Density_D（背叛者密度），保存每个时间步中选择背叛策略的个体比例
-            model.save_data('Density_C', f'Density_C_r{r}', r, C_Y) # Density_C（合作者密度），保存每个时间步中选择合作策略的个体比例
-            model.save_data('Value_D', f'Value_D_r{r}', r, D_Value) # Value_D（背叛者收益），保存每个时间步中背叛者的平均收益
-            model.save_data('Value_C', f'Value_C_r{r}', r, C_Value) # Value_C（合作者收益），保存每个时间步中合作者的平均收益
-            model.save_data('Total_Value', f'Total_Value_r{r}', r, all_value) # Total_Value（系统总收益）,保存每个时间步中整个网格的总收益
+            model.save_data('Density_D', f'r{r}', r, D_Y) # Density_D（背叛者密度），保存每个时间步中选择背叛策略的个体比例
+            model.save_data('Density_C', f'r{r}', r, C_Y) # Density_C（合作者密度），保存每个时间步中选择合作策略的个体比例
+            model.save_data('Value_D', f'r{r}', r, D_Value) # Value_D（背叛者收益），保存每个时间步中背叛者的平均收益
+            model.save_data('Value_C', f'r{r}', r, C_Value) # Value_C（合作者收益），保存每个时间步中合作者的平均收益
+            model.save_data('Total_Value', f'r{r}', r, all_value) # Total_Value（系统总收益）,保存每个时间步中整个网格的总收益
             
             plt.clf()
             plt.close("all")
@@ -253,10 +245,6 @@ if __name__ == "__main__":
     parser.add_argument('-batch_size', type=int, default=1, help='Batch size')
     parser.add_argument('-gae_lambda', type=float, default=0.95, help='GAE lambda')
     parser.add_argument('-device', type=str, default='cuda', help='Device')
-    parser.add_argument('-is_PPO', action='store_true', default=True, help='is PPO')
-    parser.add_argument('-is_not_PPO', action='store_false', dest='is_PPO', help='is not PPO')
-    parser.add_argument('-is_fermi', action='store_true', default=True, help='is Fermi')
-    parser.add_argument('-is_not_fermi', action='store_false', dest='is_fermi', help='is not Fermi')
     parser.add_argument('-seed', type=int, default=1, help='random seed')
     parser.add_argument('-output_path', type=str, default='data', help='output path')
     parser.add_argument('-delta', type=float, default=0.5, help='delta')
