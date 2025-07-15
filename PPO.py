@@ -153,8 +153,8 @@ class SPGG(nn.Module):
             _, values = self.policy(states)
             _, next_values = self.policy(next_states)
         
-        values=values.squeeze()
-        next_values=next_values.squeeze()
+        # values=values.squeeze()
+        # next_values=next_values.squeeze()
 
         advantages = torch.zeros_like(rewards)
         last_advantage = 0
